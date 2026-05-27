@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32-CAM • AI Object Detection 60FPS</title>
+
+    <!-- TensorFlow.js + COCO-SSD Model -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js">
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js">
+    </script>
+
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --panel-bg: #111118;
+            --accent: #00e5a0;
+            --accent2: #00b4d8;
+            --danger: #ff4d6a;
+            --text: #e0e0e0;
+            --text-secondary: #999;
+            --glass: rgba(20, 20, 30, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --radius: 16px;
+            --radius-sm: 10px;
+            --shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+            --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-image:
+                radial-gradient(ellipse at 30% 20%, rgba(0, 229, 160, 0.04) 0%, transparent 55%),
+                radial-gradient(ellipse at 70% 70%, rgba(0, 180, 216, 0.05) 0%, transparent 55%),
+                radial-gradient(ellipse at 50% 50%, rgba(100, 100, 140, 0.03) 0%, transparent 70%);
+        }
+
+        /* ── Container Utama ────────────────────── */
+        .main-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            transition: all var(--transition);
+        }
+
+        /* ── Kamera Container ──────────────────── */
+        .camera-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 960px;
+            aspect-ratio: 4/3;
+            max-height: 75vh;
+            border-radius: var(--radius);
+            overflow: hidden;
+            background: #000;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--glass-border);
+            cursor: pointer;
+            transition: all var(--transition);
+            will-change: transform;
+            transform: translateZ(0);
+        }
+        .camera-wrapper:hover {
+            border-color: rgba(255, 255, 255, 0.18);
+            box-shadow: 0 12px 50px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
+        }
+        .camera-wrapper:active {
+            transform: scale(0.995);
+            transition: transform 0.1s ease;
+        }
+
+        /* Stream Image */
+        #stream-img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+            image-rendering: auto;
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+        }
+
+        /* Overlay Canvas untuk Bounding Box */
+        #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            will-change: transform;
+            transform: translateZ(0);
+        }
+
+        /* Status watermark */
+        .stream-status {
+            position: absolute;
+            top: 14px;
+            left: 18px;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #00ff88;
+            box-shadow: 0 0 12px #00ff88aa;
+            animation: pulse-dot 1.8s ease-in-out infinite;
+        }
+        .status-dot.offline {
+            background: #ff4444;
+            box-shadow: 0 0 10px #ff444488;
+            animation: none;
+        }
+        .status-label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #fff;
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.5);
+            padding: 4px 10px;
+            border-radius: 20px;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+        @keyframes pulse-dot {
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.4;
+                transform: scale(1.5);
+            }
+        }
+
+        /* FPS Counter */
+        .fps-counter {
+            position: absolute;
+            top: 14px;
+            right: 18px;
+            z-index: 20;
+            pointer-events: none;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.55);
+            padding: 5px 12px;
+            border-radius: 20px;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            font-variant-numeric: tabular-nums;
+            font-family: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
+        }
+        .fps-counter .fps-val {
+            color: #00ff88;
+            font-size: 15px;
+        }
+
+        /* ── Kontrol Panel ────────────────────── */
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+            justify-content: center;
+            z-index: 30;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 10px 18px;
+            border-radius: 50px;
+            border: 1px solid var(--glass-border);
+            background: var(--glass);
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            transition: all var(--transition);
+            white-space: nowrap;
+            position: relative;
+            overflow: hidden;
+        }
+        .btn:hover {
+            background: rgba(30, 30, 45, 0.9);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+        }
+        .btn:active {
+            transform: scale(0.94);
+            transition: transform 0.1s ease;
+        }
+        .btn.accent {
+            background: rgba(0, 229, 160, 0.15);
+            border-color: rgba(0, 229, 160, 0.35);
+            color: #00e5a0;
+        }
+        .btn.accent:hover {
+            background: rgba(0, 229, 160, 0.25);
+            box-shadow: 0 0 28px rgba(0, 229, 160, 0.2);
+        }
+        .btn.danger {
+            background: rgba(255, 77, 106, 0.12);
+            border-color: rgba(255, 77, 106, 0.3);
+            color: #ff4d6a;
+        }
+        .btn-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        /* Detected Objects List */
+        .detected-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+            justify-content: center;
+            z-index: 30;
+            max-width: 960px;
+            width: 100%;
+            min-height: 24px;
+        }
+        .detected-tag {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 5px 12px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #ccc;
+            letter-spacing: 0.02em;
+            animation: fadeInTag 0.35s ease;
+        }
+        .detected-tag.highlight {
+            background: rgba(0, 229, 160, 0.15);
+            border-color: rgba(0, 229, 160, 0.4);
+            color: #00e5a0;
+        }
+        @keyframes fadeInTag {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ── Fullscreen Mode ──────────────────── */
+        .camera-wrapper.fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+            aspect-ratio: auto !important;
+            border-radius: 0 !important;
+            z-index: 9999;
+            border: none;
+            box-shadow: none;
+        }
+        .camera-wrapper.fullscreen #stream-img {
+            object-fit: contain;
+        }
+        .fullscreen-hint {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 25;
+            pointer-events: none;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+            letter-spacing: 0.04em;
+            transition: opacity 0.6s;
+        }
+        .fullscreen .fullscreen-hint {
+            opacity: 0;
+        }
+
+        /* ── Settings Panel ───────────────────── */
+        .settings-panel {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.9);
+            background: var(--panel-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            padding: 24px;
+            z-index: 10000;
+            width: 90%;
+            max-width: 440px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .settings-panel.open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        .settings-panel h3 {
+            margin-bottom: 16px;
+            font-size: 16px;
+            letter-spacing: 0.02em;
+            color: #fff;
+        }
+        .settings-panel label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            color: #aaa;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+        .settings-panel input {
+            width: 100%;
+            padding: 11px 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.04);
+            color: #fff;
+            font-size: 13px;
+            font-family: 'SF Mono', 'Cascadia Code', monospace;
+            letter-spacing: 0.02em;
+            margin-bottom: 14px;
+            transition: all var(--transition);
+            outline: none;
+        }
+        .settings-panel input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0, 229, 160, 0.1);
+        }
+        .settings-panel .btn-row {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 4px;
+        }
+
+        /* Overlay background */
+        .overlay-bg {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 9999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        .overlay-bg.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* ── Loading Spinner ──────────────────── */
+        .loading-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 15;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+        .loading-indicator.hidden {
+            display: none;
+        }
+        .spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid rgba(255, 255, 255, 0.15);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        .loading-text {
+            font-size: 11px;
+            color: #aaa;
+            letter-spacing: 0.03em;
+        }
+
+        /* ── Responsive ───────────────────────── */
+        @media (max-width: 640px) {
+            .camera-wrapper {
+                border-radius: var(--radius-sm);
+                max-height: 60vh;
+            }
+            .btn {
+                padding: 8px 14px;
+                font-size: 11px;
+                gap: 4px;
+            }
+            .fps-counter {
+                top: 8px;
+                right: 10px;
+                font-size: 10px;
+                padding: 4px 9px;
+            }
+            .stream-status {
+                top: 8px;
+                left: 10px;
+            }
+            .status-label {
+                font-size: 9px;
+                padding: 3px 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Overlay Background untuk Settings -->
+    <div class="overlay-bg" id="overlay-bg"></div>
+
+    <!-- Main Container -->
+    <div class="main-container" id="main-container">
+
+        <!-- Camera Wrapper -->
+        <div class="camera-wrapper" id="camera-wrapper" title="Klik 2x untuk Full Screen">
+            <!-- Stream dari ESP32-CAM -->
+            <img id="stream-img"
+            src=""
+            alt="ESP32-CAM Stream"
+            crossorigin="anonymous"
+            loading="eager"
+            decoding="async">
+
+            <!-- Overlay Canvas untuk Bounding Box Deteksi -->
+            <canvas id="overlay-canvas"></canvas>
+
+            <!-- Loading Indicator -->
+            <div class="loading-indicator" id="loading-indicator">
+                <div class="spinner"></div>
+                <span class="loading-text">Menghubungkan...</span>
+            </div>
+
+            <!-- Status Dot -->
+            <div class="stream-status">
+                <span class="status-dot offline" id="status-dot"></span>
+                <span class="status-label" id="status-label">OFFLINE</span>
+            </div>
+
+            <!-- FPS Counter -->
+            <div class="fps-counter">
+                <span class="fps-val" id="fps-val">--</span> FPS
+            </div>
+
+            <!-- Fullscreen Hint -->
+            <div class="fullscreen-hint" id="fullscreen-hint">🖱️ Klik 2x untuk Full Screen • Tekan <b>F</b></div>
+        </div>
+
+        <!-- Detected Objects Tags -->
+        <div class="detected-list" id="detected-list"></div>
+
+        <!-- Controls -->
+        <div class="controls-bar">
+            <button class="btn accent" id="btn-fullscreen" title="Full Screen (F)">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <polyline points="8 3 3 3 3 8"></polyline>
+                    <polyline points="16 3 21 3 21 8"></polyline>
+                    <polyline points="21 16 21 21 16 21"></polyline>
+                    <polyline points="3 16 3 21 8 21"></polyline>
+                </svg>
+                Full Screen
+            </button>
+            <button class="btn" id="btn-detect-toggle" title="Toggle AI Detection (D)">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <circle cx="12" cy="12" r="2.5"></circle>
+                    <line x1="12" y1="2" x2="12" y2="6"></line>
+                </svg>
+                <span id="btn-detect-text">AI Deteksi: ON</span>
+            </button>
+            <button class="btn" id="btn-settings" title="Pengaturan">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                Atur URL
+            </button>
+            <button class="btn danger" id="btn-screenshot" title="Screenshot (S)">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <rect x="3" y="6" width="18" height="14" rx="3"></rect>
+                    <circle cx="12" cy="13" r="3.5"></circle>
+                    <line x1="8" y1="4" x2="16" y2="4"></line>
+                </svg>
+                Screenshot
+            </button>
+        </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="settings-panel" id="settings-panel">
+        <h3>⚙️ Pengaturan ESP32-CAM</h3>
+        <label>URL Stream MJPEG</label>
+        <input type="text" id="input-stream-url" placeholder="http://192.168.1.100:81/stream">
+        <label>URL Capture (untuk AI deteksi)</label>
+        <input type="text" id="input-capture-url" placeholder="http://192.168.1.100/capture">
+        <div class="btn-row">
+            <button class="btn" id="btn-close-settings">Batal</button>
+            <button class="btn accent" id="btn-save-settings">💾 Simpan & Hubungkan</button>
+        </div>
+        <p style="font-size:10px;color:#777;margin-top:12px;line-height:1.5;">
+            ℹ️ Pastikan ESP32-CAM sudah menyala dan WiFi terhubung.<br>
+            Untuk AI deteksi, ESP32 harus mengirim header CORS: <code style="color:#00e5a0;">Access-Control-Allow-Origin: *</code>
+        </p>
+    </div>
+
+    <script>
+        (function() {
+            // ──────────────────────────────────────
+            //  KONFIGURASI DEFAULT
+            // ──────────────────────────────────────
+            const DEFAULT_STREAM_URL = 'http://192.168.1.100:81/stream';
+            const DEFAULT_CAPTURE_URL = 'http://192.168.1.100/capture';
+
+            // ──────────────────────────────────────
+            //  DOM ELEMENTS
+            // ──────────────────────────────────────
+            const streamImg = document.getElementById('stream-img');
+            const overlayCanvas = document.getElementById('overlay-canvas');
+            const overlayCtx = overlayCanvas.getContext('2d', { alpha: true });
+            const cameraWrapper = document.getElementById('camera-wrapper');
+            const statusDot = document.getElementById('status-dot');
+            const statusLabel = document.getElementById('status-label');
+            const fpsVal = document.getElementById('fps-val');
+            const detectedList = document.getElementById('detected-list');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const fullscreenHint = document.getElementById('fullscreen-hint');
+            const settingsPanel = document.getElementById('settings-panel');
+            const overlayBg = document.getElementById('overlay-bg');
+            const inputStreamUrl = document.getElementById('input-stream-url');
+            const inputCaptureUrl = document.getElementById('input-capture-url');
+            const btnDetectText = document.getElementById('btn-detect-text');
+
+            // ──────────────────────────────────────
+            //  STATE
+            // ──────────────────────────────────────
+            let streamUrl = localStorage.getItem('esp32_stream_url') || DEFAULT_STREAM_URL;
+            let captureUrl = localStorage.getItem('esp32_capture_url') || DEFAULT_CAPTURE_URL;
+            let aiDetectionEnabled = localStorage.getItem('esp32_ai_detection') !== 'false'; // default ON
+            let cocoModel = null;
+            let modelLoading = false;
+            let modelLoaded = false;
+            let detectionInterval = null;
+            let isFullscreen = false;
+            let streamConnected = false;
+
+            // FPS tracking
+            let frameCount = 0;
+            let lastFpsTime = performance.now();
+            let currentFps = 0;
+            let fpsUpdateInterval = null;
+
+            // Smooth bounding boxes (lerp)
+            let previousDetections = [];
+            const LERP_FACTOR = 0.45; // smoothing factor
+
+            // ──────────────────────────────────────
+            //  INISIALISASI
+            // ──────────────────────────────────────
+            inputStreamUrl.value = streamUrl;
+            inputCaptureUrl.value = captureUrl;
+
+            function connectStream() {
+                if (!streamUrl) return;
+                streamConnected = false;
+                updateStatus(false);
+                loadingIndicator.classList.remove('hidden');
+                streamImg.src = streamUrl + '?_t=' + Date.now(); // cache buster
+            }
+
+            // Load COCO-SSD Model
+            async function loadModel() {
+                if (modelLoaded || modelLoading) return;
+                if (!aiDetectionEnabled) return;
+                modelLoading = true;
+                console.log('🔄 Memuat model COCO-SSD...');
+                try {
+                    cocoModel = await cocoSsd.load({
+                        base: 'lite_mobilenet_v2'
+                    });
+                    modelLoaded = true;
+                    modelLoading = false;
+                    console.log('✅ Model COCO-SSD siap!');
+                    startDetectionLoop();
+                } catch (err) {
+                    console.error('❌ Gagal memuat model:', err);
+                    modelLoading = false;
+                    modelLoaded = false;
+                    // Fallback: coba lagi setelah beberapa detik
+                    setTimeout(() => {
+                        if (!modelLoaded && aiDetectionEnabled) loadModel();
+                    }, 5000);
+                }
+            }
+
+            function startDetectionLoop() {
+                stopDetectionLoop();
+                if (!aiDetectionEnabled || !modelLoaded) return;
+                // Jalankan deteksi setiap ~400ms (bisa disesuaikan)
+                detectionInterval = setInterval(() => {
+                    if (streamConnected && modelLoaded && aiDetectionEnabled) {
+                        detectFromCapture();
+                    }
+                }, 420);
+                console.log('🔍 Loop deteksi dimulai (setiap ~420ms)');
+            }
+
+            function stopDetectionLoop() {
+                if (detectionInterval) {
+                    clearInterval(detectionInterval);
+                    detectionInterval = null;
+                }
+                // Clear overlay
+                overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+                previousDetections = [];
+            }
+
+            // ──────────────────────────────────────
+            //  DETEKSI OBJEK dari /capture
+            // ──────────────────────────────────────
+            async function detectFromCapture() {
+                if (!captureUrl || !cocoModel || !modelLoaded) return;
+                try {
+                    const fetchUrl = captureUrl + '?_t=' + Date.now();
+                    const response = await fetch(fetchUrl, {
+                        mode: 'cors',
+                        cache: 'no-store',
+                    });
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.src = blobUrl;
+
+                    await new Promise((resolve, reject) => {
+                        img.onload = resolve;
+                        img.onerror = () => reject(new Error('Gagal load gambar capture'));
+                        setTimeout(() => reject(new Error('Timeout load gambar')), 4000);
+                    });
+
+                    // Resize canvas overlay agar match dengan ukuran stream img
+                    syncCanvasSize();
+
+                    // Jalankan deteksi
+                    const predictions = await cocoModel.detect(img);
+                    URL.revokeObjectURL(blobUrl);
+
+                    // Update bounding box dengan smoothing
+                    updateOverlay(predictions);
+                    updateDetectedTags(predictions);
+
+                } catch (err) {
+                    // CORS atau network error - jangan spam console
+                    if (err.message.includes('Failed to fetch') || err.message.includes('CORS') || err.message
+                        .includes('NetworkError')) {
+                        // Silent - CORS likely not configured
+                        console.warn('⚠️ Gagal fetch capture (CORS?):', err.message);
+                    } else {
+                        console.warn('⚠️ Detection error:', err.message);
+                    }
+                    // Clear overlay jika gagal terus
+                    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+                    previousDetections = [];
+                }
+            }
+
+            function syncCanvasSize() {
+                const rect = streamImg.getBoundingClientRect();
+                const wrapperRect = cameraWrapper.getBoundingClientRect();
+                const relW = rect.width;
+                const relH = rect.height;
+                const relX = rect.left - wrapperRect.left;
+                const relY = rect.top - wrapperRect.top;
+
+                if (overlayCanvas.width !== Math.round(relW) || overlayCanvas.height !== Math.round(relH)) {
+                    overlayCanvas.width = Math.round(relW);
+                    overlayCanvas.height = Math.round(relH);
+                }
+                overlayCanvas.style.left = relX + 'px';
+                overlayCanvas.style.top = relY + 'px';
+                overlayCanvas.style.width = relW + 'px';
+                overlayCanvas.style.height = relH + 'px';
+            }
+
+            function updateOverlay(predictions) {
+                syncCanvasSize();
+                const w = overlayCanvas.width;
+                const h = overlayCanvas.height;
+                overlayCtx.clearRect(0, 0, w, h);
+
+                // Smoothing: lerp posisi box dari frame sebelumnya
+                const smoothed = [];
+                for (const pred of predictions) {
+                    const [x, y, bw, bh] = pred.bbox;
+                    // Cari kecocokan dengan deteksi sebelumnya berdasarkan kelas dan IoU
+                    const prev = previousDetections.find(p =>
+                        p.class === pred.class && iou(p.bbox, [x, y, bw, bh]) > 0.4
+                    );
+                    let sx, sy, sbw, sbh;
+                    if (prev) {
+                        const [px, py, pbw, pbh] = prev.bbox;
+                        sx = px + (x - px) * LERP_FACTOR;
+                        sy = py + (y - py) * LERP_FACTOR;
+                        sbw = pbw + (bw - pbw) * LERP_FACTOR;
+                        sbh = pbh + (bh - pbh) * LERP_FACTOR;
+                    } else {
+                        sx = x;
+                        sy = y;
+                        sbw = bw;
+                        sbh = bh;
+                    }
+                    smoothed.push({ ...pred, bbox: [sx, sy, sbw, sbh] });
+                }
+                previousDetections = smoothed;
+
+                // Gambar bounding box
+                for (const pred of smoothed) {
+                    const [x, y, bw, bh] = pred.bbox;
+                    const score = pred.score;
+                    const alpha = Math.min(1, score * 1.2);
+                    const hue = (pred.class.charCodeAt(0) * 40 + pred.class.charCodeAt(1) * 10) % 360;
+                    const color = `hsla(${hue}, 85%, 58%, ${alpha})`;
+                    const colorFill = `hsla(${hue}, 85%, 58%, 0.15)`;
+
+                    // Glow effect
+                    overlayCtx.shadowColor = color;
+                    overlayCtx.shadowBlur = 10 * alpha;
+                    overlayCtx.strokeStyle = color;
+                    overlayCtx.lineWidth = 2.5 * alpha + 1;
+                    overlayCtx.fillStyle = colorFill;
+                    overlayCtx.beginPath();
+                    overlayCtx.roundRect(x, y, bw, bh, 6);
+                    overlayCtx.fill();
+                    overlayCtx.stroke();
+                    overlayCtx.shadowBlur = 0;
+
+                    // Label
+                    const label = `${pred.class} (${Math.round(score * 100)}%)`;
+                    const fontSize = Math.max(10, Math.min(13, bw * 0.12));
+                    overlayCtx.font = `bold ${fontSize}px "Inter","Segoe UI",system-ui,sans-serif`;
+                    const textMetrics = overlayCtx.measureText(label);
+                    const textW = textMetrics.width + 10;
+                    const textH = fontSize + 7;
+                    const labelY = y - textH > 0 ? y - textH : y;
+
+                    overlayCtx.fillStyle = color.replace('58%', '45%').replace('hsla', 'hsla').replace(/[\d.]+\)$/,
+                        '0.85)');
+                    overlayCtx.beginPath();
+                    overlayCtx.roundRect(x, labelY, textW, textH, 5);
+                    overlayCtx.fill();
+
+                    overlayCtx.fillStyle = '#fff';
+                    overlayCtx.fillText(label, x + 5, labelY + textH - 5);
+                }
+            }
+
+            function iou(boxA, boxB) {
+                const [ax, ay, aw, ah] = boxA;
+                const [bx, by, bw, bh] = boxB;
+                const xA = Math.max(ax, bx);
+                const yA = Math.max(ay, by);
+                const xB = Math.min(ax + aw, bx + bw);
+                const yB = Math.min(ay + ah, by + bh);
+                const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+                const boxAArea = aw * ah;
+                const boxBArea = bw * bh;
+                return interArea / (boxAArea + boxBArea - interArea + 0.001);
+            }
+
+            function updateDetectedTags(predictions) {
+                if (predictions.length === 0) {
+                    detectedList.innerHTML =
+                        '<span style="font-size:11px;color:#555;letter-spacing:0.03em;">🔍 Tidak ada objek terdeteksi</span>';
+                    return;
+                }
+                const unique = [];
+                const seen = new Set();
+                for (const p of predictions) {
+                    if (!seen.has(p.class)) {
+                        seen.add(p.class);
+                        unique.push(p);
+                    }
+                }
+                unique.sort((a, b) => b.score - a.score);
+                detectedList.innerHTML = unique.slice(0, 12).map((p, i) => {
+                    const cls = i < 3 ? 'detected-tag highlight' : 'detected-tag';
+                    return `<span class="${cls}">📦 ${p.class} <small>(${Math.round(p.score*100)}%)</small></span>`;
+                }).join('');
+            }
+
+            // ──────────────────────────────────────
+            //  STREAM EVENT HANDLERS
+            // ──────────────────────────────────────
+            streamImg.addEventListener('load', () => {
+                streamConnected = true;
+                updateStatus(true);
+                loadingIndicator.classList.add('hidden');
+                syncCanvasSize();
+                console.log('📡 Stream terhubung!');
+                if (aiDetectionEnabled && !modelLoaded && !modelLoading) {
+                    loadModel();
+                }
+                if (aiDetectionEnabled && modelLoaded) {
+                    startDetectionLoop();
+                }
+            });
+
+            streamImg.addEventListener('error', () => {
+                streamConnected = false;
+                updateStatus(false);
+                loadingIndicator.classList.remove('hidden');
+                console.warn('❌ Gagal terhubung ke stream. Cek URL ESP32-CAM.');
+            });
+
+            function updateStatus(online) {
+                if (online) {
+                    statusDot.classList.remove('offline');
+                    statusLabel.textContent = 'LIVE';
+                    statusLabel.style.color = '#fff';
+                } else {
+                    statusDot.classList.add('offline');
+                    statusLabel.textContent = 'OFFLINE';
+                    statusLabel.style.color = '#ff8888';
+                }
+            }
+
+            // ──────────────────────────────────────
+            //  FPS COUNTER (60fps UI loop)
+            // ──────────────────────────────────────
+            function fpsLoop(timestamp) {
+                frameCount++;
+                if (timestamp - lastFpsTime >= 1000) {
+                    currentFps = Math.round(frameCount / ((timestamp - lastFpsTime) / 1000));
+                    frameCount = 0;
+                    lastFpsTime = timestamp;
+                    fpsVal.textContent = currentFps;
+                }
+                // Sync canvas position setiap frame (untuk responsivitas)
+                if (streamConnected && aiDetectionEnabled && modelLoaded) {
+                    syncCanvasSize();
+                }
+                requestAnimationFrame(fpsLoop);
+            }
+            requestAnimationFrame(fpsLoop);
+
+            // ──────────────────────────────────────
+            //  FULL SCREEN
+            // ──────────────────────────────────────
+            function toggleFullscreen() {
+                if (isFullscreen) {
+                    exitFullscreen();
+                } else {
+                    enterFullscreen();
+                }
+            }
+
+            function enterFullscreen() {
+                if (cameraWrapper.requestFullscreen) {
+                    cameraWrapper.requestFullscreen().catch(() => {
+                        // Fallback: manual class
+                        cameraWrapper.classList.add('fullscreen');
+                        isFullscreen = true;
+                        fullscreenHint.style.opacity = '0';
+                    });
+                } else {
+                    cameraWrapper.classList.add('fullscreen');
+                    isFullscreen = true;
+                    fullscreenHint.style.opacity = '0';
+                }
+            }
+
+            function exitFullscreen() {
+                if (document.fullscreenElement && document.exitFullscreen) {
+                    document.exitFullscreen().catch(() => {});
+                }
+                cameraWrapper.classList.remove('fullscreen');
+                isFullscreen = false;
+                fullscreenHint.style.opacity = '1';
+            }
+
+            // Listen for fullscreen change
+            document.addEventListener('fullscreenchange', () => {
+                if (document.fullscreenElement === cameraWrapper) {
+                    isFullscreen = true;
+                    cameraWrapper.classList.add('fullscreen');
+                    fullscreenHint.style.opacity = '0';
+                } else {
+                    isFullscreen = false;
+                    cameraWrapper.classList.remove('fullscreen');
+                    fullscreenHint.style.opacity = '1';
+                }
+                // Re-sync canvas
+                setTimeout(syncCanvasSize, 200);
+            });
+
+            // Double click untuk full screen
+            cameraWrapper.addEventListener('dblclick', (e) => {
+                e.preventDefault();
+                toggleFullscreen();
+            });
+
+            // ──────────────────────────────────────
+            //  SCREENSHOT
+            // ──────────────────────────────────────
+            function takeScreenshot() {
+                const tempCanvas = document.createElement('canvas');
+                const wrapperRect = cameraWrapper.getBoundingClientRect();
+                tempCanvas.width = wrapperRect.width;
+                tempCanvas.height = wrapperRect.height;
+                const tempCtx = tempCanvas.getContext('2d', { alpha: false });
+                tempCtx.fillStyle = '#000';
+                tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+                // Draw stream img
+                const imgRect = streamImg.getBoundingClientRect();
+                const relX = imgRect.left - wrapperRect.left;
+                const relY = imgRect.top - wrapperRect.top;
+                tempCtx.drawImage(streamImg, relX, relY, imgRect.width, imgRect.height);
+
+                // Draw overlay
+                if (overlayCanvas.width > 0 && overlayCanvas.height > 0) {
+                    tempCtx.drawImage(overlayCanvas,
+                        parseFloat(overlayCanvas.style.left) || 0,
+                        parseFloat(overlayCanvas.style.top) || 0);
+                }
+
+                // Download
+                const link = document.createElement('a');
+                link.download = 'esp32cam-screenshot-' + new Date().toISOString().replace(/[:.]/g, '-') + '.png';
+                link.href = tempCanvas.toDataURL('image/png');
+                link.click();
+                console.log('📸 Screenshot diambil!');
+            }
+
+            // ──────────────────────────────────────
+            //  SETTINGS PANEL
+            // ──────────────────────────────────────
+            function openSettings() {
+                inputStreamUrl.value = streamUrl;
+                inputCaptureUrl.value = captureUrl;
+                settingsPanel.classList.add('open');
+                overlayBg.classList.add('active');
+            }
+
+            function closeSettings() {
+                settingsPanel.classList.remove('open');
+                overlayBg.classList.remove('active');
+            }
+
+            function saveSettings() {
+                const newStreamUrl = inputStreamUrl.value.trim();
+                const newCaptureUrl = inputCaptureUrl.value.trim();
+                if (newStreamUrl) {
+                    streamUrl = newStreamUrl;
+                    localStorage.setItem('esp32_stream_url', streamUrl);
+                }
+                if (newCaptureUrl) {
+                    captureUrl = newCaptureUrl;
+                    localStorage.setItem('esp32_capture_url', captureUrl);
+                }
+                closeSettings();
+                // Reconnect
+                stopDetectionLoop();
+                previousDetections = [];
+                overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+                detectedList.innerHTML = '';
+                connectStream();
+                console.log('✅ Pengaturan disimpan, menghubungkan ulang...');
+            }
+
+            // ──────────────────────────────────────
+            //  TOGGLE AI DETECTION
+            // ──────────────────────────────────────
+            function toggleAiDetection() {
+                aiDetectionEnabled = !aiDetectionEnabled;
+                localStorage.setItem('esp32_ai_detection', aiDetectionEnabled);
+                if (aiDetectionEnabled) {
+                    btnDetectText.textContent = 'AI Deteksi: ON';
+                    document.getElementById('btn-detect-toggle').classList.add('accent');
+                    if (!modelLoaded && !modelLoading && streamConnected) {
+                        loadModel();
+                    } else if (modelLoaded && streamConnected) {
+                        startDetectionLoop();
+                    }
+                } else {
+                    btnDetectText.textContent = 'AI Deteksi: OFF';
+                    document.getElementById('btn-detect-toggle').classList.remove('accent');
+                    stopDetectionLoop();
+                    previousDetections = [];
+                    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+                    detectedList.innerHTML =
+                        '<span style="font-size:11px;color:#444;">AI deteksi dimatikan</span>';
+                }
+            }
+
+            // Set initial button state
+            if (!aiDetectionEnabled) {
+                btnDetectText.textContent = 'AI Deteksi: OFF';
+                document.getElementById('btn-detect-toggle').classList.remove('accent');
+                detectedList.innerHTML = '<span style="font-size:11px;color:#444;">AI deteksi dimatikan</span>';
+            }
+
+            // ──────────────────────────────────────
+            //  KEYBOARD SHORTCUTS
+            // ──────────────────────────────────────
+            document.addEventListener('keydown', (e) => {
+                const key = e.key.toLowerCase();
+                if (e.target.tagName === 'INPUT') return; // jangan tangkap saat mengetik di input
+
+                switch (key) {
+                    case 'f':
+                        e.preventDefault();
+                        toggleFullscreen();
+                        break;
+                    case 'd':
+                        e.preventDefault();
+                        toggleAiDetection();
+                        break;
+                    case 's':
+                        e.preventDefault();
+                        takeScreenshot();
+                        break;
+                    case 'escape':
+                        if (isFullscreen) exitFullscreen();
+                        if (settingsPanel.classList.contains('open')) closeSettings();
+                        break;
+                }
+            });
+
+            // ──────────────────────────────────────
+            //  EVENT LISTENERS BUTTON
+            // ──────────────────────────────────────
+            document.getElementById('btn-fullscreen').addEventListener('click', toggleFullscreen);
+            document.getElementById('btn-detect-toggle').addEventListener('click', toggleAiDetection);
+            document.getElementById('btn-settings').addEventListener('click', openSettings);
+            document.getElementById('btn-close-settings').addEventListener('click', closeSettings);
+            document.getElementById('btn-save-settings').addEventListener('click', saveSettings);
+            document.getElementById('btn-screenshot').addEventListener('click', takeScreenshot);
+            overlayBg.addEventListener('click', closeSettings);
+
+            // ──────────────────────────────────────
+            //  RESIZE HANDLER
+            // ──────────────────────────────────────
+            window.addEventListener('resize', () => {
+                syncCanvasSize();
+            });
+
+            // ──────────────────────────────────────
+            //  INIT
+            // ──────────────────────────────────────
+            console.log('🚀 ESP32-CAM AI Object Detection');
+            console.log('   Stream URL:', streamUrl);
+            console.log('   Capture URL:', captureUrl);
+            console.log('   AI Detection:', aiDetectionEnabled ? 'ON' : 'OFF');
+            console.log('   Shortcuts: F=Fullscreen, D=Toggle AI, S=Screenshot, ESC=Exit');
+            console.log('   Double-click pada kamera = Full Screen');
+            console.log('');
+
+            // Mulai koneksi
+            connectStream();
+
+            // Pre-load model jika detection enabled
+            if (aiDetectionEnabled && !modelLoaded && !modelLoading) {
+                // Delay sedikit agar stream dulu yang connect
+                setTimeout(() => {
+                    if (streamConnected || true) {
+                        loadModel();
+                    }
+                }, 2000);
+            }
+
+            // Sync canvas size awal
+            setTimeout(syncCanvasSize, 500);
+            setTimeout(syncCanvasSize, 1500);
+
+            console.log('✅ Siap! Hubungkan ESP32-CAM dan nikmati deteksi objek real-time.');
+            console.log('💡 Jika AI deteksi error (CORS), pastikan ESP32-CAM mengirim header:');
+            console.log('   Access-Control-Allow-Origin: *');
+
+        })();
+    </script>
+</body>
+</html>
