@@ -37,8 +37,8 @@ type ArtistDetail = {
 };
 
 const QUICK_SEARCHES = ["Hindia", "Membasuh", "Kunto Aji", "Feast", "Pamungkas", "Nadin Amizah"];
-const STORAGE_LIKES = "codersmusic-liked";
-const STORAGE_RECENT = "codersmusic-recent";
+const STORAGE_LIKES = "music-liked";
+const STORAGE_RECENT = "music-recent";
 
 const searchCategories = [
   { title: "Pop Indonesia", color: "#e13300", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=400&q=80" },
@@ -463,7 +463,7 @@ function PlayerCard({
         <button type="button" className="player-top-btn" onClick={onClose}><ChevronDownIcon /></button>
         <div className="player-header-text leftish">
           <span>Memainkan Lagu</span>
-          <strong>{track?.title || "CodersMusic"}</strong>
+          <strong>{track?.title || "Music"}</strong>
         </div>
         <button type="button" className="player-top-btn" onClick={onMenu}><MenuIcon /></button>
       </div>
@@ -529,7 +529,7 @@ function PlayerCard({
           <div className="airplay-pill-wrap">
             <div className="airplay-pill">
               <BrandNoteIcon />
-              <span>CodersMusic</span>
+              <span>Music</span>
             </div>
           </div>
         </div>
@@ -564,7 +564,7 @@ export default function App() {
 
   const [currentTrack, setCurrentTrack] = useState<PipedTrack | null>(null);
   const [activeQueue, setActiveQueue] = useState<PipedTrack[]>([]);
-  const [queueTitle, setQueueTitle] = useState("CodersMusic");
+  const [queueTitle, setQueueTitle] = useState("Music");
   const [likedTracks, setLikedTracks] = useState<Record<string, boolean>>({});
   const [recentPlayed, setRecentPlayed] = useState<PipedTrack[]>([]);
   const [playbackSource, setPlaybackSource] = useState<PlayableSource | null>(null);
@@ -673,7 +673,7 @@ export default function App() {
         if (fallbackTrack) {
           setCurrentTrack((previous) => previous ?? fallbackTrack);
           setActiveQueue((previous) => (previous.length > 0 ? previous : safeCharts));
-          setQueueTitle((previous) => (previous !== "CodersMusic" ? previous : "Tangga Lagu Populer"));
+          setQueueTitle((previous) => (previous !== "Music" ? previous : "Tangga Lagu Populer"));
           setDuration((previous) => previous || fallbackTrack.duration || 0);
         }
       } catch (error) {
@@ -884,7 +884,7 @@ export default function App() {
 
     const currentIndex = sourceQueue.findIndex((item) => item.id === currentTrack?.id);
     const nextIndex = currentIndex === -1 || currentIndex === sourceQueue.length - 1 ? 0 : currentIndex + 1;
-    openTrack(sourceQueue[nextIndex], sourceQueue, sourceQueue === activeQueue ? queueTitle : "CodersMusic Mix");
+    openTrack(sourceQueue[nextIndex], sourceQueue, sourceQueue === activeQueue ? queueTitle : "Music Mix");
   };
 
   const handlePrevious = () => {
@@ -893,7 +893,7 @@ export default function App() {
 
     const currentIndex = sourceQueue.findIndex((item) => item.id === currentTrack?.id);
     const previousIndex = currentIndex <= 0 ? sourceQueue.length - 1 : currentIndex - 1;
-    openTrack(sourceQueue[previousIndex], sourceQueue, sourceQueue === activeQueue ? queueTitle : "CodersMusic Mix");
+    openTrack(sourceQueue[previousIndex], sourceQueue, sourceQueue === activeQueue ? queueTitle : "Music Mix");
   };
 
   const handleTogglePlay = () => {
